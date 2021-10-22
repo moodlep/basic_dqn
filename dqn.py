@@ -68,6 +68,9 @@ class DQN(nn.Module):
             nn.Linear(config['hidden'], self.action_dim)  # logits for q-values for each action
         )
 
+        # setup the optimiser
+        self.opt = torch.optim.Adam(lr=config['learning_rate'])
+
     def forward(self, states):
         # TODO: convert states to tensors and check shape
         q_values = self.network(states)
@@ -79,10 +82,32 @@ class DQN(nn.Module):
 
         return action
 
+    def update_target_network(self ):
+        pass
+
+    def calculate_targets(self, next_states, rewards):
+        pass
+
+    def mse_loss(self, states, actions, targets, dones):
+
+        # get q-values - forward
+        q_values = self.forward(states)
+        # TODO:  something with dones
+
+        # MSE loss
+        loss = F.mse_loss(q_values, targets)
+
+        self.opt.zero_grad()
+        # backwards??
+        self.opt.step()
+
+        return loss
 
     def train(self):
         total_steps = 0
         state = self.env.reset()
+
+        # Create the dqn and target networks
 
         while total_steps < self.config['total_timesteps']:
 
@@ -91,7 +116,21 @@ class DQN(nn.Module):
             next_state, reward, done, info = self.env.step(action)
             self.buffer.insert_datapoint(state, action, next_state, reward, done)
 
+            if len(self.buffer) < self.config['minimum_replay_before_updates']:
+                continue
 
+            if total_steps % self.config['target_update_steps'] ==0:
+                self.update_target_network()
+
+            # Update DQN:
+            # 1. sample a batch from the buffer
+            states, next_states, actions, rewards, dones = self.buffer.sample(self.config['batch_size'])
+
+            # 2. calculate the target q-values
+            targets = self.calculate_targets(next_states, rewards)
+
+            # 3. Calculate MSE loss
+            loss = self.mse_loss(states, actions, targets, dones)
 
 
             # set state to next_state
