@@ -9,7 +9,7 @@ import gym
 
 class Replay:
     def __init__(self, buffer_size):
-        # TODO: look into using a deque
+        # TODO: look into using a deque vs matrices
 
         self.buffer_size = buffer_size
         # self.states = torch.zeros((buffer_size,env.observation_space.shape[0]), dtype=torch.float64)
@@ -42,8 +42,6 @@ class Replay:
         self.rewards.append(reward)
         self.dones.append(done)
 
-
-
 class DQN(nn.Module):
 
     def __init__(self, config):
@@ -59,7 +57,7 @@ class DQN(nn.Module):
         # init the replay buffer
         self.buffer = Replay(self.config['replay_buffer_size'])
 
-        # create the dqn and target networks
+        # create the dqn and target network architecture
         network = nn.Sequential(
             nn.Linear(self.state_dim, config['hidden']),
             F.leaky_relu(),
@@ -72,27 +70,35 @@ class DQN(nn.Module):
         self.opt = torch.optim.Adam(lr=config['learning_rate'])
 
     def forward(self, states):
-        # TODO: convert states to tensors and check shape
-        q_values = self.network(states)
+        # convert states to tensors and check shape
+        states_t = torch.tensor(states, dtype=torch.float64)
+        q_values = self.network(states_t)
         return q_values
 
     def select_action(self, state):
-        # TODO: implement epsilon greedy
-        action = self.env.action_space.sample()
+        # implement epsilon greedy
+        if np.random.random() < self.config['epsilon']:
+            action = torch.tensor(self.env.action_space.sample(), dtype=torch.int64)
+        else:
+            action = self.forward(state).detach().argmax()
 
-        return action
+        return action.item()
 
     def update_target_network(self ):
         pass
 
-    def calculate_targets(self, next_states, rewards):
-        pass
+    def calculate_targets(self, next_states, rewards, dones):
+        dones_int = dones_int=[int(i) for i in dones]  # convert bool to int
+
+        targets = rewards + self.config['gamma'] * dones_int * (self.forward(next_states).detach().max())
+
+        return targets
 
     def mse_loss(self, states, actions, targets, dones):
 
-        # get q-values - forward
+        # get q-values - forward predictions
         q_values = self.forward(states)
-        # TODO:  something with dones
+        q_values = torch.gather(q_values, 1, torch.tensor(actions, dtype=torch.int64))
 
         # MSE loss
         loss = F.mse_loss(q_values, targets)
