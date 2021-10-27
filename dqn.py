@@ -42,7 +42,27 @@ class Replay:
         self.rewards.append(reward)
         self.dones.append(done)
 
-class DQN(nn.Module):
+class DQN_Network(nn.Module):
+    def __init__(self, config):
+        super(DQN_Network).__init__()
+
+        # create the dqn and target network architecture
+        self.network = nn.Sequential(
+            nn.Linear(self.state_dim, config['hidden']),
+            F.leaky_relu(),
+            nn.Linear(config['hidden'], config['hidden']),
+            F.leaky_relu(),
+            nn.Linear(config['hidden'], self.action_dim)  # logits for q-values for each action
+        )
+
+    def forward(self, input):
+        # convert states to tensors and check shape
+        states_t = torch.tensor(input, dtype=torch.float64)
+        q_values = self.network(states_t)
+        return q_values
+
+
+class DQN():
 
     def __init__(self, config):
         super(DQN).__init__()
@@ -57,40 +77,36 @@ class DQN(nn.Module):
         # init the replay buffer
         self.buffer = Replay(self.config['replay_buffer_size'])
 
-        # create the dqn and target network architecture
-        network = nn.Sequential(
-            nn.Linear(self.state_dim, config['hidden']),
-            F.leaky_relu(),
-            nn.Linear(config['hidden'], config['hidden']),
-            F.leaky_relu(),
-            nn.Linear(config['hidden'], self.action_dim)  # logits for q-values for each action
-        )
+        # Setup the DQN and Target networks
+        self.dqn = DQN_Network(config)
+        self.target = DQN_Network(config)
+        # Sync target and dqn networks
+        self.update_target_network()
 
         # setup the optimiser
         self.opt = torch.optim.Adam(lr=config['learning_rate'])
 
-    def forward(self, states):
-        # convert states to tensors and check shape
-        states_t = torch.tensor(states, dtype=torch.float64)
-        q_values = self.network(states_t)
-        return q_values
-
     def select_action(self, state):
         # implement epsilon greedy
         if np.random.random() < self.config['epsilon']:
+            # Explore
             action = torch.tensor(self.env.action_space.sample(), dtype=torch.int64)
         else:
-            action = self.forward(state).detach().argmax()
+            # Exploit
+            with torch.no_grad():
+                action = self.dqn(state).argmax(axis=1)  # n_batch x n_actions
 
         return action.item()
 
     def update_target_network(self ):
-        pass
+        # copy network params from DQN to Target NN
+        self.target.load_state_dict(self.dqn.state_dict())
 
     def calculate_targets(self, next_states, rewards, dones):
-        dones_int = dones_int=[int(i) for i in dones]  # convert bool to int
+        idones= [int(i) for i in dones]  # convert bool to int
 
-        targets = rewards + self.config['gamma'] * dones_int * (self.forward(next_states).detach().max())
+        with torch.no_grad():
+            targets = rewards + self.config['gamma'] * idones * (self.target(next_states).max) # TODO
 
         return targets
 
