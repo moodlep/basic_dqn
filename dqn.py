@@ -57,7 +57,7 @@ class DQN_Network(nn.Module):
 
     def forward(self, input):
         # convert states to tensors and check shape
-        states_t = torch.tensor(input, dtype=torch.float64)
+        states_t = torch.tensor(input, dtype=torch.float)
         q_values = self.network(states_t)
         return q_values
 
@@ -77,16 +77,18 @@ class DQN():
         # init the replay buffer
         self.buffer = Replay(self.config['replay_buffer_size'])
 
-        # Setup the DQN and Target networks
+        # Setup the DQN and Target networks and the syncing mechanism
         self.dqn = DQN_Network(config)
         self.target = DQN_Network(config)
         # Sync target and dqn networks
         self.update_target_network()
 
-        # setup the optimiser
-        self.opt = torch.optim.Adam(lr=config['learning_rate'])
+        # setup the optimiser: what's important here is attaching the parameters to the optimiser
+        self.opt = torch.optim.Adam(self.dqn.parameters(),lr=config['learning_rate'])
 
     def select_action(self, state):
+        # Input state: 1 x dim_state
+        # Output action: 1 x dim_action
         # implement epsilon greedy
         if np.random.random() < self.config['epsilon']:
             # Explore
@@ -94,7 +96,7 @@ class DQN():
         else:
             # Exploit
             with torch.no_grad():
-                action = self.dqn(state).argmax(axis=1)  # n_batch x n_actions
+                action = self.dqn(state).argmax(axis=1)  # n_batch (= 1) x n_actions
 
         return action.item()
 
@@ -106,11 +108,24 @@ class DQN():
         idones= [int(i) for i in dones]  # convert bool to int
 
         with torch.no_grad():
-            targets = rewards + self.config['gamma'] * idones * (self.target(next_states).max) # TODO
+            next_actions = self.target(next_states).argmax(axis=1)
+            targets = rewards + self.config['gamma'] * idones * (self.target(torch.tensor(next_states,
+                                                                                          dtype=torch.float)).max(1))
 
         return targets
 
-    def mse_loss(self, states, actions, targets, dones):
+    def get_batch_from_buffer(self):
+        # sample a batch and return as tensors
+        states, next_states, actions, rewards, dones = self.buffer.sample(self.config['batch_size'])
+        states_t = torch.tensor(states, dtype=torch.float)
+        next_states_t = torch.tensor(states, dtype=torch.float)
+        actions_t = torch.tensor(actions, dtype=torch.int)
+        rewards_t = torch.tensor(rewards, dtype=torch.float)
+        dones_t = torch.tensor(dones, dtype=torch.bool)
+
+        return states_t, actions_t, next_states_t, rewards_t, dones_t
+
+    def mse_loss(self, states, actions, targets):
 
         # get q-values - forward predictions
         q_values = self.forward(states)
@@ -120,10 +135,10 @@ class DQN():
         loss = F.mse_loss(q_values, targets)
 
         self.opt.zero_grad()
-        # backwards??
+        loss.backward()
         self.opt.step()
 
-        return loss
+        return loss.item()
 
     def train(self):
         total_steps = 0
@@ -141,10 +156,12 @@ class DQN():
             if len(self.buffer) < self.config['minimum_replay_before_updates']:
                 continue
 
+            # Update the target network from the dqn's latest weights:
             if total_steps % self.config['target_update_steps'] ==0:
                 self.update_target_network()
 
-            # Update DQN:
+            # If we have enough data in the replay buffer, start training a batch after every step is collected from
+            # the end, i.e. update the DQN
             # 1. sample a batch from the buffer
             states, next_states, actions, rewards, dones = self.buffer.sample(self.config['batch_size'])
 
@@ -154,9 +171,11 @@ class DQN():
             # 3. Calculate MSE loss
             loss = self.mse_loss(states, actions, targets, dones)
 
-
             # set state to next_state
             state = next_state
+
+            # update step counter
+            total_steps+=1
 
 
 
