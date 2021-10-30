@@ -5,6 +5,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 import gym
+from torch.utils.tensorboard import SummaryWriter
 
 
 class Replay:
@@ -86,6 +87,9 @@ class DQN():
         # setup the optimiser: what's important here is attaching the parameters to the optimiser
         self.opt = torch.optim.Adam(self.dqn.parameters(),lr=config['learning_rate'])
 
+        # Setup the tensorboard writer
+        self.summary_writer = SummaryWriter(log_dir = '/Users/perusha/tensorboard/october_2021/', flush_secs=30)
+
     def select_action(self, state):
         # Input state: 1 x dim_state
         # Output action: 1 x dim_action
@@ -142,16 +146,26 @@ class DQN():
 
     def train(self):
         total_steps = 0
+        episode_counter = 0
         state = self.env.reset()
 
-        # Create the dqn and target networks
+        ep_rewards = []
+        ep_len = 0
+
+        # With a max step count limit, run episodes, collect data and update the DQN.
+        # Outside loop counts max steps for DQN in total. Could also set this to a max episode count
+        # When do we perform the update: once per step (not waiting for episode completion or anything)
 
         while total_steps < self.config['total_timesteps']:
 
             # Collect data until the buffer has reached the minimum size
             action = self.select_action(state)
             next_state, reward, done, info = self.env.step(action)
+
+            # collect data
             self.buffer.insert_datapoint(state, action, next_state, reward, done)
+            ep_rewards.append(reward)
+            ep_len +=1
 
             if len(self.buffer) < self.config['minimum_replay_before_updates']:
                 continue
@@ -170,12 +184,22 @@ class DQN():
 
             # 3. Calculate MSE loss
             loss = self.mse_loss(states, actions, targets, dones)
+            self.summary_writer.add_scalar("loss", loss, total_steps)
 
             # set state to next_state
             state = next_state
 
             # update step counter
             total_steps+=1
+
+            # process episode
+            if done:
+                state = self.env.reset()
+                self.summary_writer.add_scalar("episode_reward", sum(ep_rewards), episode_counter)
+                self.summary_writer.add_scalar("episode_length", sum(ep_len), episode_counter)
+                episode_counter +=1
+                ep_rewards = []
+                ep_len = 0
 
 
 
