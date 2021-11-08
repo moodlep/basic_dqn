@@ -26,7 +26,7 @@ class Replay:
         self.dones = deque(maxlen=buffer_size)
 
     def sample(self, batch_size):
-        indices = np.random.randint(0, self.buffer_size-1,batch_size)
+        indices = np.random.randint(0, self.len()-1,batch_size)
         # TODO: extract these sampled indices from each matrix
         states = [self.states[i] for i in indices ]
         next_states = [self.next_states[i] for i in indices ]
@@ -43,16 +43,23 @@ class Replay:
         self.rewards.append(reward)
         self.dones.append(done)
 
+    def len(self):
+        return len(self.states)
+
 class DQN_Network(nn.Module):
-    def __init__(self, config):
-        super(DQN_Network).__init__()
+    def __init__(self, state_dim, action_dim, config):
+        super(DQN_Network, self).__init__()
+
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.config = config
 
         # create the dqn and target network architecture
         self.network = nn.Sequential(
             nn.Linear(self.state_dim, config['hidden']),
-            F.leaky_relu(),
+            nn.LeakyReLU(),
             nn.Linear(config['hidden'], config['hidden']),
-            F.leaky_relu(),
+            nn.LeakyReLU(),
             nn.Linear(config['hidden'], self.action_dim)  # logits for q-values for each action
         )
 
@@ -73,14 +80,15 @@ class DQN():
         # init the env
         self.env = gym.make(config['env'])
         self.state_dim = self.env.observation_space.shape[0]
-        self.action_dim = self.env.action_space.shape[0]
+        self.action_dim = self.env.action_space.n
+        # self.action_dim = self.env.action_space.shape[0]
 
         # init the replay buffer
         self.buffer = Replay(self.config['replay_buffer_size'])
 
         # Setup the DQN and Target networks and the syncing mechanism
-        self.dqn = DQN_Network(config)
-        self.target = DQN_Network(config)
+        self.dqn = DQN_Network(self.state_dim, self.action_dim, config)
+        self.target = DQN_Network(self.state_dim, self.action_dim, config)
         # Sync target and dqn networks
         self.update_target_network()
 
@@ -100,7 +108,7 @@ class DQN():
         else:
             # Exploit
             with torch.no_grad():
-                action = self.dqn(state).argmax(axis=1)  # n_batch (= 1) x n_actions
+                action = self.dqn(state).argmax()  # n_batch (= 1) x n_actions
 
         return action.item()
 
@@ -110,11 +118,15 @@ class DQN():
 
     def calculate_targets(self, next_states, rewards, dones):
         idones= [int(i) for i in dones]  # convert bool to int
+        idones_t = torch.tensor(idones, dtype=torch.int)
 
         with torch.no_grad():
-            next_actions = self.target(next_states).argmax(axis=1)
-            targets = rewards + self.config['gamma'] * idones * (self.target(torch.tensor(next_states,
-                                                                                          dtype=torch.float)).max(1))
+            # next_actions = self.target(next_states).argmax(axis=1)
+            print(rewards)
+            print(idones_t)
+            print(self.target(torch.tensor(next_states,dtype=torch.float)).max(1))
+            targets = rewards + self.config['gamma'] * idones_t * (self.target(torch.tensor(next_states,
+                                                                                           dtype=torch.float)).max(1))
 
         return targets
 
@@ -167,7 +179,7 @@ class DQN():
             ep_rewards.append(reward)
             ep_len +=1
 
-            if len(self.buffer) < self.config['minimum_replay_before_updates']:
+            if self.buffer.len() < self.config['minimum_replay_before_updates']:
                 continue
 
             # Update the target network from the dqn's latest weights:
@@ -180,7 +192,7 @@ class DQN():
             states, next_states, actions, rewards, dones = self.buffer.sample(self.config['batch_size'])
 
             # 2. calculate the target q-values
-            targets = self.calculate_targets(next_states, rewards)
+            targets = self.calculate_targets(next_states, rewards, dones)
 
             # 3. Calculate MSE loss
             loss = self.mse_loss(states, actions, targets, dones)
