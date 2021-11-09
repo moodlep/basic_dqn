@@ -117,7 +117,7 @@ class DQN():
         self.target.load_state_dict(self.dqn.state_dict())
 
     def calculate_targets(self, next_states, rewards, dones):
-        idones= [int(i) for i in dones]  # convert bool to int
+        idones= [int(not i) for i in dones]  # invert bool and convert to int
         idones_t = torch.tensor(idones, dtype=torch.int)
 
         with torch.no_grad():
