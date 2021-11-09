@@ -1,5 +1,5 @@
 from collections import deque
-
+import time, datetime,os
 import torch
 import torch.nn as nn
 import numpy as np
@@ -69,6 +69,9 @@ class DQN_Network(nn.Module):
         q_values = self.network(states_t)
         return q_values
 
+    def stats(self):
+        for param in self.network.parameters():
+            print(param, param.grad)
 
 class DQN():
 
@@ -92,11 +95,45 @@ class DQN():
         # Sync target and dqn networks
         self.update_target_network()
 
-        # setup the optimiser: what's important here is attaching the parameters to the optimiser
+        # setup the optimiser: what's important here is attaching the parameters to the optimiser ;) Doh!
         self.opt = torch.optim.Adam(self.dqn.parameters(),lr=config['learning_rate'])
 
         # Setup the tensorboard writer
-        self.summary_writer = SummaryWriter(log_dir = '/Users/perusha/tensorboard/november_2021/', flush_secs=30)
+        self.setup_logging()
+        self.summary_writer.add_graph(self.dqn, torch.tensor(self.env.observation_space.sample(), dtype=torch.float))
+
+        # TODO setup epsilon annealing
+        self.epsilon_setup()
+
+    def setup_logging(self):
+        ts = time.time()
+        # datestr = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%')
+        timestamp = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%H%M%S')
+
+        log_dir = self.config['tensorboard_folder']+timestamp
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.summary_writer = SummaryWriter(log_dir=log_dir, flush_secs=30)
+
+    def epsilon_setup(self):
+        # 'total_timesteps': 150000,
+        # 'minimum_replay_before_updates': 1000,
+        # 'epsilon_start': 1.0,
+        # 'epsilon_end': 0.01,
+        # 'exploration_percentage': 0.5,
+
+        self.exploration_timesteps = (self.config['total_timesteps']-self.config['minimum_replay_before_updates']) * \
+                                self.config['exploration_percentage']
+        self.epsilon_steps = self.exploration_timesteps/100
+        self.epsilon = self.config['epsilon_start']
+
+    def get_epsilon(self, timestep):
+
+        if timestep > self.exploration_timesteps:
+            if timestep % self.epsilon_steps == 0 and self.epsilon != self.config['epsilon_end']:
+                self.epsilon -= 0.01
+            else:
+                self.epsilon = self.config['epsilon_end']
 
     def select_action(self, state):
         # Input state: 1 x dim_state
@@ -139,6 +176,10 @@ class DQN():
 
         return states_t, actions_t, next_states_t, rewards_t, dones_t
 
+    def log_network_stats(self):
+        # capture the grad norm to tensorboard
+        pass
+
     def mse_loss(self, states, actions, targets):
 
         # get q-values - forward predictions
@@ -155,6 +196,8 @@ class DQN():
         loss.backward()
         self.opt.step()
 
+        self.log_network_stats()
+
         return loss.item()
 
     def train(self):
@@ -164,6 +207,8 @@ class DQN():
 
         ep_rewards = []
         ep_len = 0
+
+        running_loss = 0.0
 
         # With a max step count limit, run episodes, collect data and update the DQN.
         # Outside loop counts max steps for DQN in total. Could also set this to a max episode count
@@ -205,7 +250,10 @@ class DQN():
 
             # 3. Calculate MSE loss
             loss = self.mse_loss(states, actions, targets)  # returns loss.item()
+            running_loss += loss
             self.summary_writer.add_scalar("loss", loss, total_steps-self.config['minimum_replay_before_updates'])
+            self.summary_writer.add_scalar("running_loss", running_loss, total_steps-self.config[
+                'minimum_replay_before_updates'])
 
             # set state to next_state
             state = next_state
