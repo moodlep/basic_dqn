@@ -96,7 +96,7 @@ class DQN():
         self.opt = torch.optim.Adam(self.dqn.parameters(),lr=config['learning_rate'])
 
         # Setup the tensorboard writer
-        self.summary_writer = SummaryWriter(log_dir = '/Users/perusha/tensorboard/october_2021/', flush_secs=30)
+        self.summary_writer = SummaryWriter(log_dir = '/Users/perusha/tensorboard/november_2021/', flush_secs=30)
 
     def select_action(self, state):
         # Input state: 1 x dim_state
@@ -122,13 +122,11 @@ class DQN():
 
         with torch.no_grad():
             # next_actions = self.target(next_states).argmax(axis=1)
-            print(rewards)
-            print(idones_t)
-            print(self.target(torch.tensor(next_states,dtype=torch.float)).max(1))
-            targets = rewards + self.config['gamma'] * idones_t * (self.target(torch.tensor(next_states,
-                                                                                           dtype=torch.float)).max(1))
+            next_action_values = self.target(next_states).max(1)[0]
+            # print("next action values: ", next_action_values.detach())
+            targets = torch.tensor(rewards, dtype=torch.float) + self.config['gamma'] * idones_t * (next_action_values)
 
-        return targets
+        return targets.unsqueeze(-1)
 
     def get_batch_from_buffer(self):
         # sample a batch and return as tensors
@@ -144,9 +142,12 @@ class DQN():
     def mse_loss(self, states, actions, targets):
 
         # get q-values - forward predictions
-        q_values = self.forward(states)
-        q_values = torch.gather(q_values, 1, torch.tensor(actions, dtype=torch.int64))
+        current_q_values = self.dqn.forward(states)
 
+        # print("all q_values: ", current_q_values.detach().shape)
+        # print("actions: ", len(actions), actions)
+        actions_t = torch.tensor(actions, dtype=torch.int64).unsqueeze(-1)
+        q_values = torch.gather(current_q_values, -1, actions_t)
         # MSE loss
         loss = F.mse_loss(q_values, targets)
 
@@ -176,11 +177,19 @@ class DQN():
 
             # collect data
             self.buffer.insert_datapoint(state, action, next_state, reward, done)
-            ep_rewards.append(reward)
-            ep_len +=1
+            # ep_rewards.append(reward)
+            # ep_len +=1
 
             if self.buffer.len() < self.config['minimum_replay_before_updates']:
+                if done:
+                    state = self.env.reset()
+                else:
+                    state = next_state
                 continue
+
+            # When do we start logging the rewards and lengths? After we have min buffer info?
+            ep_rewards.append(reward)
+            ep_len +=1
 
             # Update the target network from the dqn's latest weights:
             if total_steps % self.config['target_update_steps'] ==0:
@@ -195,8 +204,8 @@ class DQN():
             targets = self.calculate_targets(next_states, rewards, dones)
 
             # 3. Calculate MSE loss
-            loss = self.mse_loss(states, actions, targets, dones)
-            self.summary_writer.add_scalar("loss", loss, total_steps)
+            loss = self.mse_loss(states, actions, targets)  # returns loss.item()
+            self.summary_writer.add_scalar("loss", loss, total_steps-self.config['minimum_replay_before_updates'])
 
             # set state to next_state
             state = next_state
@@ -204,16 +213,20 @@ class DQN():
             # update step counter
             total_steps+=1
 
+            # Print some stats to screen
+            if total_steps % self.config['print_steps'] == 0:
+                print("Loss at ", total_steps, " steps is ", loss)
+
             # process episode
             if done:
                 state = self.env.reset()
                 self.summary_writer.add_scalar("episode_reward", sum(ep_rewards), episode_counter)
-                self.summary_writer.add_scalar("episode_length", sum(ep_len), episode_counter)
+                self.summary_writer.add_scalar("episode_length", ep_len, episode_counter)
                 episode_counter +=1
                 ep_rewards = []
                 ep_len = 0
 
-
+        self.summary_writer.close()
 
 
 
