@@ -102,7 +102,6 @@ class DQN():
         self.setup_logging()
         self.summary_writer.add_graph(self.dqn, torch.tensor(self.env.observation_space.sample(), dtype=torch.float))
 
-        # TODO setup epsilon annealing
         self.epsilon_setup()
 
     def setup_logging(self):
@@ -116,30 +115,21 @@ class DQN():
         self.summary_writer = SummaryWriter(log_dir=log_dir, flush_secs=30)
 
     def epsilon_setup(self):
-        # 'total_timesteps': 150000,
-        # 'minimum_replay_before_updates': 1000,
-        # 'epsilon_start': 1.0,
-        # 'epsilon_end': 0.01,
-        # 'exploration_percentage': 0.5,
+        self.duration = self.config['total_timesteps'] * self.config['exploration_percentage']
+        self.start_e = self.config['epsilon_start']
+        self.end_e = self.config['epsilon_end']
+        self.slope =  (self.end_e - self.start_e) / self.duration
+        self.epsilon = self.start_e
 
-        self.exploration_timesteps = (self.config['total_timesteps']-self.config['minimum_replay_before_updates']) * \
-                                self.config['exploration_percentage']
-        self.epsilon_steps = self.exploration_timesteps/100
-        self.epsilon = self.config['epsilon_start']
-
-    def get_epsilon(self, timestep):
-
-        if timestep > self.exploration_timesteps:
-            if timestep % self.epsilon_steps == 0 and self.epsilon != self.config['epsilon_end']:
-                self.epsilon -= 0.01
-            else:
-                self.epsilon = self.config['epsilon_end']
+    def epsilon_linear_schedule(self, t: int):
+        # borrowed from cleanrl just cause it was neater...
+        return max(self.slope * t + self.start_e, self.end_e)
 
     def select_action(self, state):
         # Input state: 1 x dim_state
         # Output action: 1 x dim_action
         # implement epsilon greedy
-        if np.random.random() < self.config['epsilon']:
+        if np.random.random() < self.epsilon:
             # Explore
             action = torch.tensor(self.env.action_space.sample(), dtype=torch.int64)
         else:
@@ -158,10 +148,10 @@ class DQN():
         idones_t = torch.tensor(idones, dtype=torch.int)
 
         with torch.no_grad():
-            # next_actions = self.target(next_states).argmax(axis=1)
-            next_action_values = self.target(next_states).max(1)[0]
-            # print("next action values: ", next_action_values.detach())
-            targets = torch.tensor(rewards, dtype=torch.float) + self.config['gamma'] * idones_t * (next_action_values)
+            # next_action_values = self.target(next_states).max(1)[0]
+            next_action_values = self.target(next_states)
+            targets = torch.tensor(rewards, dtype=torch.float) + self.config['gamma'] * idones_t * (
+                torch.max(next_action_values,dim=1).values)
 
         return targets.unsqueeze(-1)
 
@@ -217,13 +207,14 @@ class DQN():
         while total_steps < self.config['total_timesteps']:
 
             # Collect data until the buffer has reached the minimum size
+            self.epsilon = self.epsilon_linear_schedule(total_steps)
+            self.summary_writer.add_scalar("epsilon", self.epsilon, total_steps)
+
             action = self.select_action(state)
             next_state, reward, done, info = self.env.step(action)
 
             # collect data
             self.buffer.insert_datapoint(state, action, next_state, reward, done)
-            # ep_rewards.append(reward)
-            # ep_len +=1
 
             if self.buffer.len() < self.config['minimum_replay_before_updates']:
                 if done:
