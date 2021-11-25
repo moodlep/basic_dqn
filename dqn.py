@@ -107,12 +107,12 @@ class DQN():
     def setup_logging(self):
         ts = time.time()
         # datestr = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%')
-        timestamp = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%H%M%S')
+        self.timestamp = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%H%M%S')
 
-        log_dir = self.config['tensorboard_folder']+timestamp
+        log_dir = self.config['tensorboard_folder']+self.timestamp
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-        self.summary_writer = SummaryWriter(log_dir=log_dir, flush_secs=30)
+        self.summary_writer = SummaryWriter(log_dir=log_dir)
 
     def epsilon_setup(self):
         self.duration = self.config['total_timesteps'] * self.config['exploration_percentage']
@@ -171,7 +171,6 @@ class DQN():
         pass
 
     def mse_loss(self, states, actions, targets):
-
         # get q-values - forward predictions
         current_q_values = self.dqn.forward(states)
 
@@ -189,6 +188,9 @@ class DQN():
         self.log_network_stats()
 
         return loss.item()
+
+    def save(self, filename):
+        torch.save(self.dqn.state_dict(), filename+"_"+str(self.timestamp))
 
     def train(self):
         total_steps = 0
@@ -256,6 +258,9 @@ class DQN():
             if total_steps % self.config['print_steps'] == 0:
                 print("Loss at ", total_steps, " steps is ", loss)
 
+            if total_steps % self.config['checkpointing_steps'] == 0:
+                self.save("chkpts/chkpt_dqn_"+str(total_steps/self.config['checkpointing_steps']))
+
             # process episode
             if done:
                 state = self.env.reset()
@@ -265,7 +270,10 @@ class DQN():
                 ep_rewards = []
                 ep_len = 0
 
+            self.summary_writer.flush()
+
         self.summary_writer.close()
+        self.save("chkpts/final_chkpt_dqn")
 
 
 
