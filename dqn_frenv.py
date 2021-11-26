@@ -4,14 +4,13 @@ import torch
 import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
+from torch.nn.functional import one_hot
 import gym
 from torch.utils.tensorboard import SummaryWriter
 
 
 class Replay:
     def __init__(self, buffer_size):
-        # TODO: look into using a deque vs matrices
-
         self.buffer_size = buffer_size
         # self.states = torch.zeros((buffer_size,env.observation_space.shape[0]), dtype=torch.float64)
         # self.next_states = torch.zeros((buffer_size,env.observation_space.shape[0]), dtype=torch.float64)
@@ -27,7 +26,6 @@ class Replay:
 
     def sample(self, batch_size):
         indices = np.random.randint(0, self.len()-1,batch_size)
-        # TODO: extract these sampled indices from each matrix
         states = [self.states[i] for i in indices ]
         next_states = [self.next_states[i] for i in indices ]
         actions = [self.actions[i] for i in indices ]
@@ -65,7 +63,8 @@ class DQN_Network(nn.Module):
 
     def forward(self, input):
         # convert states to tensors and check shape
-        states_t = torch.tensor(input, dtype=torch.float)
+        states_t = torch.tensor(torch.nn.functional.one_hot(torch.tensor(input), self.state_dim), dtype=torch.float)
+        # states_t = torch.tensor(input, dtype=torch.float)
         q_values = self.network(states_t)
         return q_values
 
@@ -81,9 +80,9 @@ class DQN():
         self.config = config
 
         # init the env
-        self.env = gym.make(config['env'])
+        self.env = gym.make(config['env'], env_config={})
         self.action_dim = self.env.action_space.n
-        if self.env.observation_space is gym.spaces.Discrete:
+        if type(self.env.observation_space) is gym.spaces.discrete.Discrete:
             self.state_dim = self.env.observation_space.n
         else:
             self.state_dim = self.env.observation_space.shape[0]
@@ -102,19 +101,21 @@ class DQN():
 
         # Setup the tensorboard writer
         self.setup_logging()
-        self.summary_writer.add_graph(self.dqn, torch.tensor(self.env.observation_space.sample(), dtype=torch.float))
+        # one_hot(torch.tensor(self.state), num_classes=121)
+        # self.summary_writer.add_graph(self.dqn, [self.env.observation_space.sample()])
+        # self.summary_writer.add_graph(self.dqn, torch.tensor(torch.nn.functional.one_hot(torch.tensor(
+        #     self.env.observation_space.sample()) , self.state_dim), dtype=torch.float))
 
         self.epsilon_setup()
 
     def setup_logging(self):
         ts = time.time()
-        # datestr = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%')
         self.timestamp = datetime.datetime.fromtimestamp(ts).strftime('%Y%m%d%H%M%S')
 
         log_dir = self.config['tensorboard_folder']+self.timestamp
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
-        self.summary_writer = SummaryWriter(log_dir=log_dir)
+        self.summary_writer = SummaryWriter(log_dir=log_dir, flush_secs=30)
 
     def epsilon_setup(self):
         self.duration = self.config['total_timesteps'] * self.config['exploration_percentage']
@@ -146,6 +147,7 @@ class DQN():
 
         with torch.no_grad():
             # next_action_values = self.target(next_states).max(1)[0]
+            # next_states_t = torch.nn.functional.one_hot(torch.tensor(next_states), self.state_dim)
             next_action_values = self.target(next_states)
             targets = torch.tensor(rewards, dtype=torch.float) + self.config['gamma'] * idones_t * (
                 torch.max(next_action_values,dim=1).values)
