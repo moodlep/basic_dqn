@@ -3,10 +3,20 @@ import time, datetime,os
 import torch
 import torch.nn as nn
 import numpy as np
+import random
 import torch.nn.functional as F
 from torch.nn.functional import one_hot
 import gym
 from torch.utils.tensorboard import SummaryWriter
+from config import config
+
+from action_selection_functions import Action_selection
+
+# Set seeds - list from cleanrl
+seed = config['seed']
+random.seed(seed)
+np.random.seed(seed)
+torch.manual_seed(seed)
 
 
 class Replay:
@@ -101,12 +111,15 @@ class DQN():
 
         # Setup the tensorboard writer
         self.setup_logging()
-        # one_hot(torch.tensor(self.state), num_classes=121)
+        # Adding graph is causing some problem in tensorboard and not showing any data... remove for now...
         # self.summary_writer.add_graph(self.dqn, [self.env.observation_space.sample()])
         # self.summary_writer.add_graph(self.dqn, torch.tensor(torch.nn.functional.one_hot(torch.tensor(
         #     self.env.observation_space.sample()) , self.state_dim), dtype=torch.float))
 
         self.epsilon_setup()
+
+        # add biased action selection
+        self.action_selection = Action_selection()
 
     def setup_logging(self):
         ts = time.time()
@@ -130,7 +143,11 @@ class DQN():
 
     def select_action(self, state):
         if np.random.random() < self.epsilon:
-            action = torch.tensor(self.env.action_space.sample(), dtype=torch.int64)
+            # action = torch.tensor(self.env.action_space.sample(), dtype=torch.int64)
+            if self.config['biased_exploration']:
+                action = torch.tensor(self.action_selection.biased_explore_flat(), dtype=torch.int64)
+            else:
+                action = torch.tensor(self.env.action_space.sample(), dtype=torch.int64)
         else:
             with torch.no_grad():
                 action = self.dqn(state).argmax()  # n_batch (= 1) x n_actions
@@ -275,5 +292,6 @@ class DQN():
         self.save("chkpts/final_chkpt_dqn")
 
 
-
+agent = DQN(config)
+agent.train()
 

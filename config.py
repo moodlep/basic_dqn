@@ -5,7 +5,7 @@ from frenv.envs.env_wrapper_v7 import FourRoomsEnvExtv7
 
 config = {
     'env': 'FourRoomsEnvExtv7-v0',
-    'total_timesteps': 300000,
+    'total_timesteps': 100000,
     'replay_buffer_size': 5000,
     'minimum_replay_before_updates': 1000,
     'target_update_steps': 1000,
@@ -19,6 +19,8 @@ config = {
     'print_steps': 10000,
     'tensorboard_folder': '/Users/perusha/tensorboard/nov_2021_frenv/',
     'checkpointing_steps': 10000,
+    'biased_exploration': False,
+    'seed': 12345,
 }
 
 config_success_400episodes = {
