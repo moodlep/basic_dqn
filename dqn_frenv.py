@@ -90,7 +90,8 @@ class DQN():
         self.config = config
 
         # init the env
-        self.env = gym.make(config['env'], env_config={})
+        self.env = gym.make(config['env'], env_config={'task_config': None})
+        self.env.render()
         self.action_dim = self.env.action_space.n
         if type(self.env.observation_space) is gym.spaces.discrete.Discrete:
             self.state_dim = self.env.observation_space.n
@@ -143,7 +144,6 @@ class DQN():
 
     def select_action(self, state):
         if np.random.random() < self.epsilon:
-            # action = torch.tensor(self.env.action_space.sample(), dtype=torch.int64)
             if self.config['biased_exploration']:
                 action = torch.tensor(self.action_selection.biased_explore_flat(), dtype=torch.int64)
             else:
@@ -200,6 +200,11 @@ class DQN():
         self.opt.zero_grad()
         loss.backward()
         self.opt.step()
+
+        # perform multiple gradient updates during high exploration phase to make the most of the biased
+        # exploration.
+        if self.config['multi_grad_updates'] and self.epsilon > self.config['multi_grad_threshold']:
+            self.opt.step()
 
         self.log_network_stats()
 
@@ -292,6 +297,6 @@ class DQN():
         self.save("chkpts/final_chkpt_dqn")
 
 
-agent = DQN(config)
-agent.train()
+# agent = DQN(config)
+# agent.train()
 

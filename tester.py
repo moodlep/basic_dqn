@@ -14,6 +14,6 @@ torch.manual_seed(seed)
 # env.action_space.seed(args.seed)
 # env.observation_space.seed(args.seed)
 
-
-agent = DQN(config)
-agent.train()
+for i in range(5):
+    agent = DQN(config)
+    agent.train()
